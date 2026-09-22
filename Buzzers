@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Buzzer</title>
+
+<!--
+  ============================================================
+  SETUP (do this before it will work):
+  1. Go to https://console.firebase.google.com -> Add project (free).
+  2. In your project: Build -> Realtime Database -> Create Database
+     -> start in TEST MODE (open read/write - fine for a casual game,
+     see the security note near the bottom of this file).
+  3. Project settings (gear icon) -> General -> "Your apps" -> Add app
+     -> Web (</>) -> copy the firebaseConfig object it gives you.
+  4. Paste it over the placeholder FIREBASE_CONFIG object below.
+  5. Push this file to a GitHub repo, enable GitHub Pages
+     (Settings -> Pages -> Deploy from branch), open the URL it gives you.
+  ============================================================
+-->
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --surface: #ffffff;
+    --text: #16181d;
+    --text-dim: #6b7280;
+    --border: #e3e5e9;
+    --accent: #6366f1;
+    --danger: #ef4444;
+    --shadow: rgba(0,0,0,0.08);
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #101114; --surface: #1a1b1f; --text: #f1f2f4;
+      --text-dim: #9aa0aa; --border: #2b2d33; --shadow: rgba(0,0,0,0.4);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column; min-height: 100%;
+  }
+  .topbar {
+    padding: 12px 16px; display: flex; align-items: center;
+    justify-content: space-between; font-size: 13px; color: var(--text-dim);
+  }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#9ca3af; margin-right:6px; }
+  .dot.live { background:#22c55e; }
+  .screen {
+    flex: 1; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; padding: 24px 16px 40px; text-align: center;
+  }
+  .hidden { display: none !important; }
+  h1 { font-size: 28px; margin: 0 0 6px; }
+  p.sub { color: var(--text-dim); margin: 0 0 28px; max-width: 340px; }
+  .role-buttons { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+  .role-btn {
+    width: 160px; padding: 28px 16px; border-radius: 20px; border: 1px solid var(--border);
+    background: var(--surface); box-shadow: 0 4px 16px var(--shadow); cursor: pointer;
+    font-size: 16px; font-weight: 600; color: var(--text);
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+  }
+  .role-btn:active { transform: scale(0.96); }
+  .role-btn .emoji { font-size: 40px; }
+
+  .code-box {
+    font-size: 44px; font-weight: 800; letter-spacing: 6px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; padding: 14px 24px; margin: 6px 0 18px;
+  }
+  .code-input {
+    font-size: 24px; letter-spacing: 4px; text-align: center;
+    width: 180px; padding: 10px; border-radius: 12px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    text-transform: uppercase;
+  }
+  .join-btn, .primary-btn {
+    margin-top: 14px; padding: 12px 24px; border-radius: 12px; border: none;
+    background: var(--accent); color: white; font-size: 15px; font-weight: 700; cursor: pointer;
+  }
+  .error-text { color: var(--danger); font-size: 13px; min-height: 18px; margin-top: 6px; }
+
+  #player-screen { justify-content: space-between; padding-top: 8px; }
+  .player-header { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 10px; }
+  .name-input {
+    margin-top: 10px; padding: 8px 14px; border-radius: 10px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text); font-size: 14px; text-align: center; width: 200px;
+  }
+  .buzzer-wrap { flex: 1; display: flex; align-items: center; justify-content: center; width: 100%; }
+  .buzzer {
+    width: min(62vw, 280px); height: min(62vw, 280px); border-radius: 50%; border: none;
+    font-size: 22px; font-weight: 800; color: white;
+    box-shadow: 0 10px 0 rgba(0,0,0,0.25), 0 14px 30px var(--shadow);
+    transition: transform 0.06s ease, box-shadow 0.06s ease;
+  }
+  .buzzer:active:not(:disabled) { transform: translateY(8px); box-shadow: 0 2px 0 rgba(0,0,0,0.25), 0 6px 14px var(--shadow); }
+  .buzzer:disabled { opacity: 0.55; box-shadow: 0 6px 0 rgba(0,0,0,0.2); }
+  .status-line { min-height: 26px; font-size: 15px; font-weight: 600; margin-bottom: 18px; }
+
+  #host-screen { justify-content: flex-start; padding-top: 10px; width: 100%; max-width: 640px; margin: 0 auto; }
+  .host-title { font-size: 20px; margin: 4px 0 10px; }
+  .panel {
+    width: 100%; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; padding: 16px; margin-bottom: 16px; text-align: left;
+  }
+  .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin: 0 0 12px; }
+  .players-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px;
+    background: var(--bg); border: 1px solid var(--border); font-size: 13px; font-weight: 600;
+  }
+  .chip .swatch { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+  .chip.buzzed { outline: 2px solid var(--accent); }
+  .empty-note { color: var(--text-dim); font-size: 14px; }
+  .order-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; max-height: 40vh; overflow-y: auto; }
+  .order-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 12px; background: var(--bg); border: 1px solid var(--border); }
+  .order-row.first { background: linear-gradient(90deg, rgba(250,204,21,0.18), transparent); border-color: #facc15; }
+  .rank { font-weight: 800; font-size: 15px; width: 26px; text-align: center; color: var(--text-dim); }
+  .order-row.first .rank { color: #b45309; }
+  .order-row .swatch { width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0; }
+  .order-row .rname { font-weight: 700; flex: 1; text-align: left; }
+  .order-row .rtime { font-size: 12px; color: var(--text-dim); }
+  .reset-btn { width: 100%; padding: 14px; border-radius: 14px; border: none; background: var(--danger); color: white; font-size: 16px; font-weight: 700; cursor: pointer; }
+  .leave-link { margin-top: 18px; font-size: 13px; color: var(--text-dim); text-decoration: underline; cursor: pointer; background: none; border: none; }
+  .room-code-small { font-weight: 700; letter-spacing: 2px; }
+</style>
+</head>
+<body>
+
+  <div class="topbar">
+    <span><span class="dot" id="conn-dot"></span><span id="conn-label">Connecting…</span></span>
+    <span id="room-note"></span>
+  </div>
+
+  <!-- Landing -->
+  <div class="screen" id="landing-screen">
+    <h1>🔔 Buzzer</h1>
+    <p class="sub">Pick a role. Players get a colored buzzer button — the host sees everyone and who buzzed in first.</p>
+    <div class="role-buttons">
+      <button class="role-btn" id="choose-host"><span class="emoji">🖥️</span>Host</button>
+      <button class="role-btn" id="choose-player"><span class="emoji">🔴</span>Player</button>
+    </div>
+  </div>
+
+  <!-- Join screen (players enter the host's room code) -->
+  <div class="screen hidden" id="join-screen">
+    <h1>Join a game</h1>
+    <p class="sub">Enter the 4-digit code shown on the host's screen.</p>
+    <input class="code-input" id="join-code-input" maxlength="4" placeholder="0000" inputmode="numeric">
+    <div>
+      <button class="join-btn" id="join-code-btn">Join</button>
+    </div>
+    <div class="error-text" id="join-error"></div>
+  </div>
+
+  <!-- Player screen -->
+  <div class="screen hidden" id="player-screen">
+    <div class="player-header">
+      <div style="font-size:13px;color:var(--text-dim)">Room <span class="room-code-small" id="player-room-code"></span></div>
+      <input class="name-input" id="name-input" maxlength="16" placeholder="Your name (optional)">
+    </div>
+    <div class="buzzer-wrap"><button class="buzzer" id="buzzer-btn">BUZZ</button></div>
+    <div class="status-line" id="player-status">Waiting for the round to start…</div>
+    <button class="leave-link" id="player-leave">Leave</button>
+  </div>
+
+  <!-- Host screen -->
+  <div class="screen hidden" id="host-screen">
+    <div class="host-title">🖥️ Host view</div>
+    <div style="margin-bottom:16px;">
+      <div style="font-size:12px;color:var(--text-dim)">Room code — tell your players</div>
+      <div class="code-box" id="host-code-box">····</div>
+    </div>
+    <div class="panel">
+      <h2>Players connected</h2>
+      <div class="players-grid" id="players-grid"><div class="empty-note">No players yet.</div></div>
+    </div>
+    <div class="panel">
+      <h2>Buzz order</h2>
+      <ul class="order-list" id="order-list"></ul>
+      <div class="empty-note" id="order-empty">Nobody has buzzed in yet.</div>
+    </div>
+    <button class="reset-btn" id="reset-btn">Reset round</button>
+    <button class="leave-link" id="host-leave">Leave</button>
+  </div>
+
+<script>
+// ============================================================
+// 1. PASTE YOUR FIREBASE CONFIG HERE (from the Firebase console)
+// ============================================================
+const firebaseConfig = {
+  apiKey: "AIzaSyC96zaDSANm4JshhLYOTJ3PzPf8YKzsHRc",
+  authDomain: "teambuzzers-471f2.firebaseapp.com",
+  databaseURL: "https://teambuzzers-471f2-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "teambuzzers-471f2",
+  storageBucket: "teambuzzers-471f2.firebasestorage.app",
+  messagingSenderId: "967045515385",
+  appId: "1:967045515385:web:1457afbbbfc4488911aca8",
+  measurementId: "G-CBECRL1XCJ"
+};
+
+firebase.initializeApp(FIREBASE_CONFIG);
+const db = firebase.database();
+
+(function () {
+  const MAX_PLAYERS = 10; // also enforced server-side in the database rules
+
+  const PALETTE = [
+    { name: 'Red',    hex: '#ef4444' }, { name: 'Blue',   hex: '#3b82f6' },
+    { name: 'Green',  hex: '#22c55e' }, { name: 'Yellow', hex: '#eab308' },
+    { name: 'Purple', hex: '#a855f7' }, { name: 'Orange', hex: '#f97316' },
+    { name: 'Pink',   hex: '#ec4899' }, { name: 'Cyan',   hex: '#06b6d4' },
+    { name: 'Lime',   hex: '#84cc16' }, { name: 'Indigo', hex: '#6366f1' }
+  ];
+
+  const $ = (id) => document.getElementById(id);
+  const screens = {
+    landing: $('landing-screen'), join: $('join-screen'),
+    player: $('player-screen'), host: $('host-screen')
+  };
+  function showScreen(key) {
+    Object.values(screens).forEach(s => s.classList.add('hidden'));
+    screens[key].classList.remove('hidden');
+  }
+
+  // Connection indicator (Firebase's special ".info/connected" path)
+  db.ref('.info/connected').on('value', (snap) => {
+    const connected = !!snap.val();
+    $('conn-dot').classList.toggle('live', connected);
+    $('conn-label').textContent = connected ? 'Live' : 'Connecting…';
+  });
+
+  let roomCode = null;
+  let myId = null;        // this browser tab's player id
+  let myRole = null;      // 'host' | 'player'
+  let myColor = null;
+  let myName = 'Player';
+  let hasBuzzed = false;
+  let lastSeenReset = 0;
+
+  function roomRef(path) { return db.ref('rooms/' + roomCode + (path ? '/' + path : '')); }
+  function randomCode() { return String(Math.floor(1000 + Math.random() * 9000)); }
+  function escapeHtml(str) {
+    const d = document.createElement('div'); d.textContent = String(str); return d.innerHTML;
+  }
+
+  // ---------- Host ----------
+
+  function enterHost() {
+    myRole = 'host';
+    roomCode = randomCode();
+    $('host-code-box').textContent = roomCode;
+    showScreen('host');
+
+    // Auto-clean the room when the host closes the tab
+    roomRef().onDisconnect().remove();
+    roomRef('createdAt').set(firebase.database.ServerValue.TIMESTAMP);
+
+    roomRef('players').on('value', (snap) => renderPlayers(snap.val() || {}));
+
+    roomRef('buzzOrder').on('value', (snap) => renderOrder(snap.val() || {}));
+
+    roomRef('resetAt').on('value', () => { /* host doesn't need to react, it drives resets */ });
+  }
+
+  function renderPlayers(playersObj) {
+    const grid = $('players-grid');
+    const players = Object.values(playersObj);
+    if (!players.length) {
+      grid.innerHTML = '<div class="empty-note">No players yet.</div>';
+      return;
+    }
+    grid.innerHTML = '';
+    players.forEach(p => {
+      const chip = document.createElement('div');
+      chip.className = 'chip' + (p.buzzed ? ' buzzed' : '');
+      chip.innerHTML = `<span class="swatch" style="background:${p.colorHex || '#999'}"></span>${escapeHtml(p.name || 'Player')}`;
+      grid.appendChild(chip);
+    });
+  }
+
+  function renderOrder(orderObj) {
+    const list = $('order-list');
+    const empty = $('order-empty');
+    // Firebase push() keys sort chronologically, so Object.keys() is already in buzz order
+    const entries = Object.keys(orderObj).sort().map(k => orderObj[k]);
+    if (!entries.length) { list.innerHTML = ''; empty.classList.remove('hidden'); return; }
+    empty.classList.add('hidden');
+    list.innerHTML = '';
+    const firstTs = entries[0].ts || 0;
+    entries.forEach((entry, i) => {
+      const li = document.createElement('li');
+      li.className = 'order-row' + (i === 0 ? ' first' : '');
+      const delta = (entry.ts || 0) - firstTs;
+      li.innerHTML = `
+        <span class="rank">${i === 0 ? '🏆' : '#' + (i + 1)}</span>
+        <span class="swatch" style="background:${entry.colorHex}"></span>
+        <span class="rname">${escapeHtml(entry.name)}</span>
+        <span class="rtime">${i === 0 ? 'first' : '+' + delta + 'ms'}</span>
+      `;
+      list.appendChild(li);
+    });
+  }
+
+  function doReset() {
+    roomRef('buzzOrder').remove();
+    roomRef('resetAt').set(firebase.database.ServerValue.TIMESTAMP);
+    roomRef('players').once('value', (snap) => {
+      const updates = {};
+      snap.forEach(child => { updates[child.key + '/buzzed'] = false; });
+      roomRef('players').update(updates);
+    });
+  }
+
+  // ---------- Player ----------
+
+  function goToJoinScreen() { showScreen('join'); $('join-error').textContent = ''; }
+
+  function attemptJoin() {
+    const code = $('join-code-input').value.trim();
+    if (!/^\d{4}$/.test(code)) {
+      $('join-error').textContent = 'Enter the 4-digit code the host is showing.';
+      return;
+    }
+    roomCode = code;
+    db.ref('rooms/' + roomCode).once('value', (snap) => {
+      if (!snap.exists()) {
+        $('join-error').textContent = "That room wasn't found — check the code.";
+        roomCode = null;
+        return;
+      }
+      const val = snap.val();
+      const playerCount = Object.keys(val.players || {}).length;
+      if (playerCount >= MAX_PLAYERS) {
+        $('join-error').textContent = `This room is full (max ${MAX_PLAYERS} players).`;
+        roomCode = null;
+        return;
+      }
+      enterPlayer(val);
+    });
+  }
+
+  function enterPlayer(roomSnapshotVal) {
+    myRole = 'player';
+    myId = db.ref().push().key; // unique id for this tab
+    const used = new Set(Object.values(roomSnapshotVal.players || {}).map(p => p.colorHex));
+    const free = PALETTE.filter(c => !used.has(c.hex));
+    myColor = free.length ? free[Math.floor(Math.random() * free.length)] : PALETTE[Math.floor(Math.random() * PALETTE.length)];
+
+    $('player-room-code').textContent = roomCode;
+    showScreen('player');
+    $('buzzer-btn').style.background = myColor.hex;
+
+    const myRef = roomRef('players/' + myId);
+    myRef.set({ name: myName, colorHex: myColor.hex, colorName: myColor.name, buzzed: false })
+      .then(() => myRef.onDisconnect().remove()) // leave cleanly if the tab closes
+      .catch(() => {
+        // Rejected server-side, most likely the room hit MAX_PLAYERS a moment ago
+        showScreen('join');
+        $('join-error').textContent = `This room is full (max ${MAX_PLAYERS} players).`;
+        roomCode = null;
+      });
+
+    lastSeenReset = Date.now();
+    roomRef('resetAt').on('value', (snap) => {
+      const val = snap.val();
+      if (val && val > lastSeenReset - 1000) { // ignore the very first replay on join
+        lastSeenReset = val;
+        playerHandleReset();
+      }
+    });
+  }
+
+  function publishPresence() {
+    if (myRole !== 'player' || !roomCode) return;
+    roomRef('players/' + myId).update({ name: myName || 'Player' });
+  }
+
+  function doBuzz() {
+    if (hasBuzzed || !roomCode) return;
+    hasBuzzed = true;
+    $('buzzer-btn').disabled = true;
+    $('player-status').textContent = '🔒 Buzzed in — wait for reset';
+    roomRef('players/' + myId).update({ buzzed: true });
+    roomRef('buzzOrder').push({
+      name: myName || 'Player', colorHex: myColor.hex,
+      ts: firebase.database.ServerValue.TIMESTAMP
+    });
+  }
+
+  function playerHandleReset() {
+    hasBuzzed = false;
+    $('buzzer-btn').disabled = false;
+    $('player-status').textContent = 'New round — buzz in!';
+  }
+
+  // ---------- Wiring ----------
+
+  $('choose-host').addEventListener('click', enterHost);
+  $('choose-player').addEventListener('click', goToJoinScreen);
+  $('join-code-btn').addEventListener('click', attemptJoin);
+  $('join-code-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') attemptJoin(); });
+  $('buzzer-btn').addEventListener('click', doBuzz);
+  $('reset-btn').addEventListener('click', doReset);
+  $('name-input').addEventListener('input', (e) => { myName = e.target.value.trim() || 'Player'; publishPresence(); });
+  $('player-leave').addEventListener('click', () => location.reload());
+  $('host-leave').addEventListener('click', () => location.reload());
+})();
+</script>
+</body>
+</html>
